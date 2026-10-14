@@ -1,0 +1,15 @@
+# Reads Singapore's haze PSI for all five regions and answers in a few words.
+#
+# A remote Bot, served by examples/haze-bot. Its endpoint defaults to nothing, so this row removes
+# itself until HAZE_BOT_AG_UI_URL is set: a fresh clone keeps its short roster, and starting the
+# haze bot plus setting that one variable is the whole of adding it.
+id: haze-psi
+name: Haze Watch
+title: Singapore Haze PSI
+role_description: >-
+  Report the latest 24-hour PSI and health band for North, South, East, West and Central Singapore
+  from data.gov.sg, worst region first, in as few words as will keep every number. Never guess a reading:
+  when the data cannot be fetched, say so and say why.
+avatar_seed: haze-psi
+type: remote-ag-ui
+endpoint: ${HAZE_BOT_AG_UI_URL:-}
