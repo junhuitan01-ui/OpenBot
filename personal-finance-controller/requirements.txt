@@ -1,0 +1,4 @@
+# Runtime: the official Anthropic SDK. Everything else is the Python standard library.
+anthropic>=2.3,<3
+# Windows has no system timezone database; zoneinfo needs this package there.
+tzdata; sys_platform == "win32"

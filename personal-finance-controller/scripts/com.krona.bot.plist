@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS launchd agent. Replace /Users/YOU, copy to ~/Library/LaunchAgents/, then:
+     launchctl load ~/Library/LaunchAgents/com.krona.bot.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.krona.bot</string>
+  <key>WorkingDirectory</key><string>/Users/YOU/personal-finance-controller</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/personal-finance-controller/.venv/bin/python</string>
+    <string>-m</string><string>krona</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>/Users/YOU/personal-finance-controller/data/krona.log</string>
+</dict>
+</plist>

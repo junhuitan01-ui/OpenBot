@@ -1,0 +1,17 @@
+[project]
+name = "krona"
+version = "1.0.0"
+description = "KRONA - personal finance controller for Telegram. Every dollar, accounted for."
+requires-python = ">=3.10"
+dependencies = ["anthropic>=2.3,<3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 135
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]

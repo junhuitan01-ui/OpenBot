@@ -1,0 +1,17 @@
+# systemd user unit for always-on Linux hosts (e.g. a Raspberry Pi or a small VPS).
+# Install: cp scripts/krona.service ~/.config/systemd/user/ && edit the paths below, then
+#   systemctl --user daemon-reload && systemctl --user enable --now krona
+#   loginctl enable-linger "$USER"   # keep running after you log out
+[Unit]
+Description=KRONA personal finance controller (Telegram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/personal-finance-controller
+ExecStart=%h/personal-finance-controller/.venv/bin/python -m krona
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
