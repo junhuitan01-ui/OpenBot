@@ -71,16 +71,23 @@ is and isn't verified against the live services.
 
 ## Using KRONA
 
+Below the chat you get six buttons: **Today**, **Report**, **Budget**, **History**, **Undo** and
+**Help**. Commands are also listed in Telegram's `/` menu. Plain words work as well as commands:
+"help", "undo", "budget", "what did I spend today".
+
 ### Logging
 
+Type it the way you'd text it:
+
 ```
-Spent $12 on lunch
-Bought 2 bottles of protein milk at $3.80 each
-Received $900 internship pay
-Got $60 bonus from my shift
-Received a $20 refund for shoes
-Transferred $100 from my main account to savings
-I spent $18.50 on dinner yesterday
+lunch 12
+coffee $4.50
+grab 15 yesterday
+spent $30 on groceries
+bought 2 bottles of protein milk at $3.80 each
+received $900 internship pay
+received a $20 refund for shoes
+transferred $100 from DBS to Savings
 ```
 
 A successful entry is confirmed only after it is committed to the database:
@@ -91,27 +98,27 @@ Protein milk, 2 bottles, $7.60
 ```
 
 A single warning line is added only when a threshold is newly crossed. If the amount is missing or
-the numbers disagree, KRONA asks one question. Questions and plans ("I might spend $40...",
-"should I...") are never logged.
+the numbers disagree, KRONA asks one question; tapping any button instead drops the question.
+Questions and plans ("I might spend $40...", "should I...") are never logged.
+
+Mistakes: tap **Undo** (it asks first, with Yes/No buttons), or use `/edit 15.20` (last entry),
+`/edit lunch 15.20` (latest "lunch" entry) or `/edit 3 category Transport` (entry #3 from History).
 
 ### Budgets
 
 ```
-/budget overall 1200            overall monthly limit on consumption spending
-/budget set Food 400            category limit (short names like Food, Bills, Health work)
-/budget clear Food
-/budget categories
-/budget category add Pets | rename Pets to Pet care | disable Travel | enable Travel
-/budget category move Travel to Shopping      reassigns past entries, with an audit trail
-/budget commit add Rent 800 day 1             recurring bill, reserved until paid
-/budget commit add Course fee 300 on 2026-11-15
-/budget commit paid Rent                      (also automatic when you log "Paid $800 for rent")
-/budget payday 2026-11-10                     expected income date, used by "should i buy"
-/budget cooloff 100 48                        wait 48h on discretionary purchases of $100+
+food budget 400                 monthly limit for a category (also: /budget food 400)
+overall budget 1500             limit for all spending in a month
+/budget food off                remove a limit
+/budget                         what's left
+/budget commit add Rent 800 day 1     a bill you know is coming; set aside until paid
+/budget payday 2026-11-10             expected income date, used by "should i buy"
+/budget cooloff 100 48                wait 48h before discretionary buys of $100+
 ```
 
-You can set budgets gradually; logging works before anything is configured. Until a limit exists,
-KRONA says so instead of inventing warnings or allowances. Rules:
+`/help budget` lists the rest: categories, one-off bills and more. You can set budgets gradually;
+logging works before anything is configured. Until a limit exists, KRONA says so instead of
+inventing warnings or allowances. Rules:
 
 - Monthly budgets follow calendar months in Singapore time.
 - Income never raises a limit.
@@ -123,8 +130,8 @@ KRONA says so instead of inventing warnings or allowances. Rules:
 ### Accounts and goals (optional)
 
 ```
-/accounts add Main main 2500        types: main, spending, savings, investment, cash, other
-/accounts reconcile Main 2410.50
+/accounts add DBS 2500              type is guessed from the name; or give it: /accounts add Wallet 50 cash
+/accounts reconcile DBS 2410.50
 /goals add Emergency 5000 monthly 300 account Savings by 2027-06-30
 /goals protect 2000                 never counted as spendable
 ```
@@ -151,10 +158,9 @@ unavailable rather than invented.
 
 ### Other commands
 
-`/report` (also `/report last`, `/report 2026-09`), `/history` (`/history 20`, `/history all`),
-`/undo` (last entry, with confirmation), `/undo 12`, `/undo lunch` (choose from matches),
-`/edit 12 amount 15.20` (fields: amount, price, quantity, description, category, date; for
-multi-item entries: `/edit 12 item 2 quantity 3`), `/help`.
+`/today`, `/report` (also `/report last`, `/report 2026-09`), `/history` (`/history 20`,
+`/history all`), `/undo` (also `/undo 12`, `/undo lunch`), `/edit`, `/help` (also `/help budget`,
+`/help accounts`, `/help goals`, `/help edit`).
 
 Corrections never delete history. An edit marks the original `corrected` and creates a replacement;
 an undo marks it `reversed`. Both are recorded in `transaction_events`.

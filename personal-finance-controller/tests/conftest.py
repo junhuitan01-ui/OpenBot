@@ -25,15 +25,17 @@ STRANGER = 999999
 class FakeSender:
     def __init__(self):
         self.sent: list[tuple[int, str]] = []
+        self.keyboards: list[dict | None] = []
         self.fail_next: list[bool | None] = []  # None = success, False = definite failure, True = uncertain
         self._ids = itertools.count(1000)
 
-    def send(self, chat_id: int, text: str) -> int:
+    def send(self, chat_id: int, text: str, keyboard: dict | None = None) -> int:
         if self.fail_next:
             mode = self.fail_next.pop(0)
             if mode is not None:
                 raise TelegramSendError("simulated", uncertain=mode)
         self.sent.append((chat_id, text))
+        self.keyboards.append(keyboard)
         return next(self._ids)
 
     @property

@@ -39,11 +39,16 @@ def confirmation(d: TxDraft, tx_id: int, today: date) -> str:
     return "\n".join(lines)
 
 
+def short_category(name: str) -> str:
+    """'Food and groceries' -> 'Food' for compact lists; custom names are kept as they are."""
+    return name.split(" and ", 1)[0]
+
+
 def tx_line(store: Store, t: sqlite3.Row, show_status: bool = False) -> str:
     d = date.fromisoformat(t["effective_date"])
     if t["type"] == "expense":
         amount = f"-{fmt(t['total_cents'])}"
-        label = (store.category(t["category_id"])["name"] if t["category_id"] else "Uncategorised")
+        label = short_category(store.category(t["category_id"])["name"]) if t["category_id"] else "Uncategorised"
     elif t["type"] == "income":
         amount, label = f"+{fmt(t['total_cents'])}", "income"
     elif t["type"] == "refund":

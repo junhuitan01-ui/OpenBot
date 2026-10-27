@@ -1,6 +1,6 @@
 # KRONA — Project status
 
-Version 1.0.0 · last verified 2026-10-26
+Version 1.1.0 · last verified 2026-10-27
 
 ## Isolation
 
@@ -32,14 +32,15 @@ Version 1.0.0 · last verified 2026-10-26
 | "Why am I overspending" explanation from Claude, discarded if it uses any figure not in the verified facts | Done |
 | Daily briefing 07:00 Asia/Singapore, catch-up until 12:00, persistent delivery records, backoff, marked resends | Done |
 | Single authorised user, private chats only; secret redaction in logs; token-free Telegram errors | Done |
-| `/start`, `/help`, `/report`, `/budget`, `/history`, `/undo`, `/edit`, `/accounts`, `/goals` | Done |
+| `/start`, `/help` (+ topics), `/today`, `/report`, `/budget`, `/history`, `/undo`, `/edit`, `/accounts`, `/goals` | Done |
+| Usability (1.1): reply-keyboard buttons, Yes/No and numbered buttons for confirmations, Telegram `/` menu, shorthand logging ("lunch 12"), plain-word commands, plain-language budgets ("food budget 400"), forgiving `/edit` and `/accounts add`, short help and plain-English report | Done |
 
 ## Verified test results
 
 Command: `.venv/bin/python -m pytest`, run on Python 3.13.
 
 ```
-164 passed in 5.11s
+215 passed in 6.16s
 ```
 
 Run repeatedly, and again in a fresh virtualenv installed from `requirements-dev.txt`; same
@@ -56,7 +57,8 @@ result every time. `ruff check krona tests`: all checks passed.
 | `test_briefing.py` | 20 | 16.6: SGT timezone, previous day, midnight and month boundaries, no transactions, incomplete budgets, approaching and over limit, nothing left, commitments, refunds and reversals, deterministic, no duplicate, restart, catch-up, send failure, uncertain retry, crash mid-send, real scheduler thread |
 | `test_security_telegram.py` | 24 | 16.7: every command, help lists only real commands, concise confirmation, alert spam, unauthorised and group rejection, reply failure retry, uncertain not resent, Telegram error classification, no token leak, log redaction, raw text not retained, single-instance lock |
 | `test_acceptance.py` | 7 | 17 A–G end to end through `process_update` |
-| `test_integration_local.py` | 5 | real Anthropic SDK request and response handling over a stub HTTP transport; real runtime loop (polling, offsets, restart dedupe, scheduler at 07:00 SGT) against a local fake Bot API server |
+| `test_usability.py` | 51 | the 27 Oct usability diagnostic: shorthand logging (and what it must refuse), plain words and buttons, Today, plain-language budgets, Yes/No and numbered buttons, abandoning a question by tapping a button, `/edit` forms, account types, short help |
+| `test_integration_local.py` | 5 | real Anthropic SDK request and response handling over a stub HTTP transport; real runtime loop (polling, offsets, restart dedupe, command-menu registration, buttons, scheduler at 07:00 SGT) against a local fake Bot API server |
 
 ### What is mocked and what is live
 
@@ -74,6 +76,19 @@ result every time. `ruff check krona tests`: all checks passed.
   **Remaining step for you:** put your token, user ID and API key in `.env`, then run
   `python -m krona`. Send `/start`, then "Bought 2 bottles of protein milk at $3.80 each", then
   `/report`. Leave it running past 07:00 SGT to see the briefing.
+
+## Usability diagnostic (2026-10-27)
+
+A scripted first-time session of 26 typical messages was replayed through the bot, without Claude.
+
+- **Before:** 10 of the 26 got "could not interpret": `lunch 12`, `coffee $4.50`, `help`, `undo`,
+  `budget`, `hi` and others. "what did i spend today" answered with the allowance instead.
+  `/budget food 400`, `/accounts add main 2000` and `/edit lunch 15` were rejected for syntax.
+  `/help` was 1,400 characters.
+- **After:** 0 of 26 misunderstood. `/help` is under 600 characters with topic pages, and replies
+  carry buttons.
+
+No schema change was needed, so existing databases keep working unchanged.
 
 ## Known limitations
 

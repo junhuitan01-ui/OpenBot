@@ -17,31 +17,36 @@ FAKE_TOKEN = "123456789:AAFakeTokenForTestsOnly_xxxxxxxxxxxx"
 def test_all_commands_respond_meaningfully(h):
     assert "Every dollar, accounted for." in h.say("/start")
     help_text = h.say("/help")
-    for cmd in ("/report", "/budget", "/history", "/undo", "/edit", "/accounts", "/goals", "/help"):
-        assert cmd in help_text
-    assert "FINANCIAL OVERVIEW" in h.say("/report")
-    assert "BUDGET | October 2026" in h.say("/budget")
-    assert h.say("/history") == "No transactions recorded yet."
+    for topic in ("/help budget", "/help accounts", "/help goals", "/help edit"):
+        assert topic in help_text
+        assert h.say(topic) != help_text  # each topic has its own page
+    assert "TODAY · 10 Oct" in h.say("/today")
+    assert "OVERVIEW" in h.say("/report")
+    assert "BUDGET · October" in h.say("/budget")
+    assert h.say("/history") == "Nothing logged yet. Type what you spent, like: lunch 12"
     assert h.say("/undo") == "Nothing to undo."
-    assert h.say("/edit").startswith("Usage: /edit <id> <field> <value>")
-    assert "No accounts recorded" in h.say("/accounts")
-    assert "No savings goals" in h.say("/goals")
-    assert h.say("/nonsense") == "Unknown command. /help lists what works."
-    assert "FINANCIAL OVERVIEW" in h.say("/report@krona_bot")
+    assert h.say("/edit").startswith("Fix an entry:")
+    assert "No accounts yet" in h.say("/accounts")
+    assert "No savings goals yet" in h.say("/goals")
+    assert h.say("/nonsense") == "I don't know that command. Tap Help to see what works."
+    assert "OVERVIEW" in h.say("/report@krona_bot")
 
 
 def test_help_lists_only_working_commands(h):
     import re
     from krona.bot import COMMANDS
-    listed = set(re.findall(r"^/(\w+)", h.say("/help"), re.M))
+    from krona.ui import COMMAND_MENU, HELP_TOPICS
+    texts = [h.say("/help")] + list(HELP_TOPICS.values())
+    listed = {c for t in texts for c in re.findall(r"/(\w+)", t)}
     assert listed <= set(COMMANDS)
+    assert {c for c, _ in COMMAND_MENU} <= set(COMMANDS)
 
 
 def test_budget_configuration_commands(h):
-    assert h.say("/budget overall 1200") == "Overall monthly spending limit set to $1,200.00."
-    assert h.say("/budget set Food 400") == "Food and groceries limit set to $400.00 per month."
-    assert "not a valid amount" in h.say("/budget set Food abc")
-    assert "No category matches" in h.say("/budget set Nonsense 10")
+    assert h.say("/budget overall 1200").startswith("Monthly spending limit set to $1,200.00.")
+    assert h.say("/budget set Food 400") == "Food and groceries: limit set to $400.00 a month."
+    assert "isn't an amount I can use" in h.say("/budget set Food abc")
+    assert "I don't have a category called" in h.say("/budget set Nonsense 10")
     assert h.say("/budget category add Pets") == "Category added: Pets."
     assert h.say("/budget category rename Pets to Pet care") == "Renamed Pets to Pet care."
     h.say("Spent $30 on widgets")
@@ -56,20 +61,20 @@ def test_budget_configuration_commands(h):
 
 
 def test_accounts_commands(h):
-    assert h.say("/accounts add Main main 2500") == "Account added: Main (main), opening balance $2,500.00."
+    assert h.say("/accounts add Main main 2500").startswith("Added Main (main) with $2,500.00.")
     h.say("/accounts add Wallet cash 50")
     from tests.conftest import item  # noqa: F401
     reply = h.say("/accounts reconcile Main 2410.50")
     assert reply == "Main reconciled to $2,410.50 (difference -$89.50 vs KRONA's figure)."
     out = h.say("/accounts")
-    assert "user-maintained figures, not live bank balances" in out and "Main (main): $2,410.50" in out
+    assert "not live bank data" in out and "Main: $2,410.50" in out
 
 
 def test_expense_against_account_updates_manual_balance(hc):
     hc.say("/accounts add Main main 100")
     hc.interpreter.push(tx("expense", [item("Lunch", 1, None, "12")], category="Food", account="main account"))
     hc.say("Spent $12 on lunch from my main account")
-    assert "Main (main): $88.00" in hc.say("/accounts")
+    assert "Main: $88.00" in hc.say("/accounts")
 
 
 def test_goals_commands(h):

@@ -43,7 +43,7 @@ def test_same_update_processed_twice(h):
 def test_two_legitimate_identical_purchases(h):
     h.say("Spent $3 on coffee")
     reply = h.say("Spent $3 on coffee")
-    assert "Log it again as a separate purchase? Reply yes or no." in reply
+    assert "Log it again as a second purchase?" in reply
     assert h.tx_count() == 1
     assert h.say("yes") == "Logged.\nCoffee, 1 purchase, $3.00"
     assert h.tx_count() == 2
@@ -52,7 +52,7 @@ def test_two_legitimate_identical_purchases(h):
 def test_accidental_duplicate_declined(h):
     h.say("Spent $3 on coffee")
     h.say("Spent $3 on coffee")
-    assert h.say("no") == "Not logged."
+    assert h.say("no") == "OK, not logged again."
     assert h.tx_count() == 1
 
 
@@ -107,7 +107,7 @@ def test_report_correct_after_editing(h):
     h.say("/edit 1 amount 30")
     s = summarise_month(h.store, date(2026, 10, 10))
     assert s.net_spending == 3000
-    assert "spent $30.00 | limit $100.00 | left $70.00 | 30%" in build_report(h.store, date(2026, 10, 10))
+    assert "Food and groceries: $30.00 spent, $70.00 left of $100.00 (on track)" in build_report(h.store, date(2026, 10, 10))
 
 
 def test_edit_fields(h):
@@ -135,6 +135,6 @@ def test_undo_multiple_candidates_asks_to_choose(h):
     h.say("Spent $12 on lunch")
     h.say("Spent $14 on lunch with team")
     reply = h.say("/undo lunch")
-    assert reply.startswith("Which one?")
-    assert h.say("2").startswith("Reversed. #1")
+    assert reply.startswith("Which one should I undo?")
+    assert h.say("2").startswith("Undone: Lunch $12.00")
     assert h.tx_count("reversed") == 1

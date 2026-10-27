@@ -23,7 +23,7 @@ class TelegramSendError(RuntimeError):
 
 
 class Sender(Protocol):
-    def send(self, chat_id: int, text: str) -> int: ...
+    def send(self, chat_id: int, text: str, keyboard: dict | None = None) -> int: ...
 
 
 class TelegramClient:
@@ -47,10 +47,17 @@ class TelegramClient:
             payload["offset"] = offset
         return self._post("getUpdates", payload, timeout + 10)
 
-    def _send_one(self, chat_id: int, text: str) -> int:
+    def set_commands(self, commands: list[tuple[str, str]]) -> None:
+        """Register the bot's '/' menu so commands are discoverable in the Telegram app."""
+        self._post("setMyCommands", {"commands": [{"command": c, "description": d} for c, d in commands]},
+                   self.timeout_s)
+
+    def _send_one(self, chat_id: int, text: str, keyboard: dict | None = None) -> int:
+        payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
+        if keyboard is not None:
+            payload["reply_markup"] = keyboard
         try:
-            res = self._post("sendMessage", {"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
-                             self.timeout_s)
+            res = self._post("sendMessage", payload, self.timeout_s)
             return int(res["message_id"])
         except urllib.error.HTTPError as exc:
             # Telegram answered: the message was not delivered (5xx gateway errors are ambiguous).
@@ -65,13 +72,13 @@ class TelegramClient:
             # Request may have reached Telegram before the response was lost.
             raise TelegramSendError("Telegram response timed out", uncertain=True) from None
 
-    def send(self, chat_id: int, text: str) -> int:
-        """Send text, split into parts if needed. Returns the last message id."""
+    def send(self, chat_id: int, text: str, keyboard: dict | None = None) -> int:
+        """Send text, split into parts if needed; the keyboard rides on the last part. Returns its message id."""
         parts = split_message(text)
         last = 0
         for i, part in enumerate(parts):
             try:
-                last = self._send_one(chat_id, part)
+                last = self._send_one(chat_id, part, keyboard if i == len(parts) - 1 else None)
             except TelegramSendError as exc:
                 if i > 0:
                     raise TelegramSendError(str(exc), uncertain=True) from None

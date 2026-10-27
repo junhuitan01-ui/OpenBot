@@ -1,6 +1,6 @@
 [project]
 name = "krona"
-version = "1.0.0"
+version = "1.1.0"
 description = "KRONA - personal finance controller for Telegram. Every dollar, accounted for."
 requires-python = ">=3.10"
 dependencies = ["anthropic>=2.3,<3"]

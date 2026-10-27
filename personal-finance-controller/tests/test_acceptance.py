@@ -29,7 +29,7 @@ def test_A_expense_logging(hc):
     hc.restart()
     hc.bot.process_update(upd)  # reprocessing the same update after restart
     assert hc.tx_count() == 1
-    assert "Consumption spending: $7.60 gross" in hc.say("/report")
+    assert "Spent: $7.60" in hc.say("/report")
 
 
 def test_B_income(hc):
@@ -89,7 +89,7 @@ def test_E_daily_briefing(h):
     assert len(text) < 1200
     h.restart()
     assert deliver(h.store, h.sender, USER, sgt(2026, 10, 10, 7, 1)) == "already-sent"
-    assert "Not available: no spending limits are set" in compose(Store(h.conn, 5555), TODAY)
+    assert "Not worked out yet: set a monthly limit first" in compose(Store(h.conn, 5555), TODAY)
 
 
 def test_F_financial_report(h):
@@ -103,12 +103,12 @@ def test_F_financial_report(h):
     h.say("/undo 6")
     h.say("yes") if "Reply yes" in h.sender.last else None
     r = h.say("/report")
-    assert "Income received: $900.00" in r
-    assert "Consumption spending: $135.00 gross, $115.00 net of $20.00 refunds" in r
-    assert "Transfers between own accounts: $200.00" in r
-    assert "Shopping: spent $100.00 | limit $100.00 | left $0.00 | 100% | LIMIT REACHED" in r
-    assert "Reversed entries: 1" in r
-    assert "Balances (user-maintained, not live bank data):" in r
+    assert "Income: $900.00" in r
+    assert "Spent: $115.00 (after $20.00 refunds)" in r
+    assert "Moved between your accounts: $200.00 (not counted as spending or income)" in r
+    assert "Shopping: $100.00 spent, $0.00 left of $100.00 (limit reached)" in r
+    assert "Undone entries: 1" in r
+    assert "Balances (as you entered them, not live bank data): Main $1,800.00, Savings $200.00" in r
     s = summarise_month(h.store, TODAY)
     assert s.net_cash_flow == 90000 + 2000 - 13500
 
@@ -124,7 +124,7 @@ def test_G_failure_handling(hc, monkeypatch):
     monkeypatch.setattr(Store, "commit_transaction", orig)
     # Claude timeout on a message only Claude could understand.
     hc.interpreter.push(InterpreterUnavailable("timeout"))
-    assert "Nothing was logged" in hc.say("that kopi thing earlier was like four fifty")
+    assert "nothing was logged" in hc.say("that kopi thing earlier was like four fifty")
     # Telegram send failure: saved once, reply retried later, no duplicate.
     hc.sender.fail_next = [False]
     hc.interpreter.push(tx("expense", [item("Taxi", 1, None, "18")], category="Transport"))

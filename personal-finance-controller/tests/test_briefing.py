@@ -36,7 +36,7 @@ def test_month_boundary(h):
     text = compose(h.store, date(2026, 11, 1))
     assert "Spent $25.00 across 1 purchase." in text
     # New month: the full limit is available again over 30 days.
-    assert "$10.00." in text and "$300.00 left in the overall limit over 30 days" in text
+    assert "$10.00 today" in text and "$300.00 left this month spread over 30 days" in text
 
 
 def test_backdated_transaction_counted_on_its_date(h):
@@ -52,10 +52,10 @@ def test_no_transactions_recorded(h):
 
 def test_incomplete_budgets_disclosed(h):
     text = compose(h.store, date(2026, 10, 10))
-    assert "Not available: no spending limits are set" in text
+    assert "Not worked out yet: set a monthly limit first" in text
     h.say("/budget set Food 300")
     text = compose(h.store, date(2026, 10, 10))
-    assert "Provisional: no overall limit is set" in text and "$" in text
+    assert "No overall monthly limit yet, so only per-category figures" in text and "a day" in text
 
 
 def test_category_approaching_and_over_limit(h):
@@ -84,14 +84,14 @@ def test_no_discretionary_allowance_remaining(h):
     h.set_now(sgt(2026, 10, 9))
     h.say("Spent $100 on lunch")
     text = compose(h.store, date(2026, 10, 10))
-    assert "$0.00. Nothing discretionary is left" in text and "Spend nothing discretionary today." in text
+    assert "$0.00. Nothing is left in this month's limit." in text and "Spend nothing discretionary today." in text
 
 
 def test_upcoming_commitments_reduce_allowance(h):
     h.say("/budget overall 1100")
     h.say("/budget commit add Rent 440 day 28")
     text = compose(h.store, date(2026, 10, 10))
-    assert "$30.00." in text and "after $440.00 in unpaid commitments" in text
+    assert "$30.00 today" in text and "after setting aside $440.00 for bills" in text
 
 
 def test_refunds_and_reversals_in_yesterday(h):
@@ -109,7 +109,7 @@ def test_deterministic_allowance(h):
     h.say("/budget overall 660")
     a = compose(h.store, date(2026, 10, 10))
     b = compose(h.store, date(2026, 10, 10))
-    assert a == b and "$30.00." in a  # 660 / 22
+    assert a == b and "$30.00 today" in a  # 660 / 22
 
 
 def test_no_duplicate_daily_delivery(h):

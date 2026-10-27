@@ -118,6 +118,12 @@ def run(settings: Settings, *, client: TelegramClient | None = None, stop: threa
     def store_factory() -> Store:
         return Store(open_db(settings.db_path), settings.authorised_user_id)
 
+    try:
+        from .ui import COMMAND_MENU
+        client.set_commands(COMMAND_MENU)  # fills Telegram's "/" menu; harmless to repeat on every start
+    except Exception as exc:
+        log.warning("could not register the command menu (%s); commands still work", type(exc).__name__)
+
     scheduler = Scheduler(store_factory, client, settings.authorised_user_id, clock, settings.briefing_hour,
                           settings.briefing_catchup_until_hour, stop)
     scheduler.start()

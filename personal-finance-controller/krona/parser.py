@@ -43,6 +43,18 @@ _QUESTION_START = re.compile(
 )
 
 
+_NOT_SHORTHAND = re.compile(
+    r"\b(spent|spend|paid|pay|bought|buy|received|receive|got|earned|transferred|transfer|moved|salary|income|"
+    r"wage|wages|allowance|bonus|refund|refunded|budget|limit|goal|goals|account|accounts|edit|undo|report|"
+    r"history|help|owe|owes|lent|borrowed)\b")
+
+
+def _shorthand_ok(desc: str) -> bool:
+    """A shorthand description must look like a purchase, not income, a refund, a command or a question."""
+    d = desc.strip()
+    return bool(d) and len(d.split()) <= 5 and not _NOT_SHORTHAND.search(d) and not _QUESTION_START.match(d)
+
+
 def guess_category(desc: str) -> str | None:
     words = desc.lower()
     for cat, kws in CATEGORY_KEYWORDS.items():
@@ -203,6 +215,23 @@ def parse(text: str, today: date) -> dict | None:
                         "unit_plural": None, "unit_price": None, "line_total": m.group(2)}]
         tx["category"] = guess_category(m.group(1))
         tx["date"] = _date(m.group(3), today)
+        return _result("transaction", transaction=tx)
+
+    # Shorthand people actually type: "lunch 12", "coffee $4.50", "grab 15 yesterday", "$12 lunch"
+    desc = amount = when = None
+    m = re.match(r"^([a-z][a-z'&\- ]{0,40}?)\s+" + AMT + DATE + r"$", t)
+    if m:
+        desc, amount, when = m.group(1), m.group(2), m.group(3)
+    else:
+        m = re.match(r"^" + CUR_AMT + r"\s+(?:on\s+|for\s+)?([a-z][a-z'&\- ]{0,40}?)" + DATE + r"$", t)
+        if m:
+            amount, desc, when = m.group(1), m.group(2), m.group(3)
+    if desc and _shorthand_ok(desc):
+        tx = _empty_tx("expense")
+        tx["items"] = [{"description": _clean_desc(desc), "quantity": 1, "unit_singular": None,
+                        "unit_plural": None, "unit_price": None, "line_total": amount}]
+        tx["category"] = guess_category(desc)
+        tx["date"] = _date(when, today)
         return _result("transaction", transaction=tx)
 
     # Missing amount: "spent on lunch", "paid for parking"

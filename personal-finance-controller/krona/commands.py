@@ -12,6 +12,7 @@ from .fmt import confirmation, qty_phrase, tx_line
 from .money import MAX_CENTS, MoneyError, fmt, parse_cents
 from .store import ACCOUNT_KINDS, ItemDraft, Store, StoreError, TxDraft
 from .timeutil import parse_date_arg, short_date
+from .ui import HELP, HELP_TOPICS
 
 
 @dataclass
@@ -27,15 +28,15 @@ class Ctx:
 def _amount(tok: str) -> int:
     try:
         return parse_cents(tok)
-    except MoneyError as exc:
-        raise StoreError(f"'{tok}' is not a valid amount ({exc}).") from None
+    except MoneyError:
+        raise StoreError(f"'{tok}' isn't an amount I can use. Write it like 12 or 12.50.") from None
 
 
 def _cat(ctx: Ctx, name: str, include_inactive: bool = False):
     c = ctx.store.resolve_category(name, include_inactive=include_inactive)
     if c is None:
         names = ", ".join(r["name"] for r in ctx.store.categories())
-        raise StoreError(f"No category matches '{name}'. Categories: {names}.")
+        raise StoreError(f"I don't have a category called '{name}'. Categories: {names}.")
     return c
 
 
@@ -43,63 +44,27 @@ def _cat(ctx: Ctx, name: str, include_inactive: bool = False):
 def start(ctx: Ctx) -> str:
     st = ctx.store
     limits = st.active_limits()
-    cat_limits = sum(1 for k in limits if k is not None)
     lines = [
-        "KRONA",
-        "Every dollar, accounted for.",
+        "KRONA. Every dollar, accounted for.",
         "",
-        "Log activity in plain language:",
-        "- Spent $12 on lunch",
-        "- Bought 2 bottles of protein milk at $3.80 each",
-        "- Received $900 internship pay",
-        "- Received a $20 refund for shoes",
-        "- Transferred $100 from Main to Savings",
+        "1. Log spending by typing it: lunch 12",
+        "2. Set a monthly limit: overall budget 1500",
+        "3. Tap Today or Report to see where you stand",
         "",
-        "Ask before buying: should i buy these shoes for $120?",
-        "Review the month: /report",
-        "",
-        "Setup (do it in any order; logging works now):",
-        f"[{'set' if None in limits else 'not set'}] Overall monthly limit: /budget overall 1200",
-        f"[{cat_limits} set] Category limits: /budget set Food 400",
-        f"[{len(st.accounts())} added] Accounts, optional: /accounts add Main main 2500",
-        f"[{len(st.goals())} added] Savings goals, optional: /goals add Emergency 5000",
-        f"[{len(st.commitments())} added] Upcoming bills, optional: /budget commit add Rent 800 day 1",
-        "",
-        f"Daily briefing: {ctx.briefing_hour:02d}:00 Singapore time. /help lists every command.",
+        "Ask before buying: should i buy shoes for $120?",
+        f"Every morning at {ctx.briefing_hour:02d}:00 you get a short briefing here.",
     ]
-    if None not in limits:
-        lines.insert(14, "Until a limit is set, KRONA records spending but cannot warn or give a daily allowance.")
+    if None in limits:
+        lines[3] = f"2. Monthly limit: {fmt(limits[None])} (change: overall budget 1500)"
     return "\n".join(lines)
 
 
-HELP = """KRONA commands
-/report - full review of this month (/report last for last month)
-/budget - limits and usage
-  /budget overall 1200 | /budget overall off
-  /budget set Food 400 | /budget clear Food
-  /budget categories | category add Pets | category rename Pets to Pet care
-  /budget category disable Travel | category enable Travel | category move Travel to Shopping
-  /budget commit add Rent 800 day 1 | commit add Course fee 300 on 2026-11-15
-  /budget commit list | commit paid Rent | commit remove Rent
-  /budget payday 2026-11-10 | payday off
-  /budget cooloff 100 48 | cooloff off  (wait 48h on discretionary buys of $100+)
-/history - recent entries (/history 20, /history all)
-/undo - reverse the last entry (/undo 12, /undo lunch)
-/edit 12 amount 15.20 - also: price, quantity, description, category, date
-  multi-line entries: /edit 12 item 2 quantity 3
-/accounts - balances | /accounts add Main main 2500 | reconcile Main 2410.50 | remove Main
-  types: main, spending, savings, investment, cash, other
-/goals - savings goals | /goals add Emergency 5000 monthly 300 account Savings by 2027-06-30
-  /goals remove Emergency | /goals protect 2000 | /goals protect off
-/help - this list
-
-Plain-language examples
-Spent $12 on lunch
-I spent $18.50 on dinner yesterday
-Received $60 bonus from my shift
-should i buy a $45 game?
-How much can I safely spend today?
-Compare this month to last month"""
+def help_text(args: list[str]) -> str:
+    topic = args[0].lower().rstrip("s") + "s" if args else ""
+    for key in (args[0].lower() if args else "", topic, topic.rstrip("s")):
+        if key in HELP_TOPICS:
+            return HELP_TOPICS[key]
+    return HELP
 
 
 # ------------------------------------------------------------------------------ /budget
@@ -111,23 +76,27 @@ def budget(ctx: Ctx, args: list[str]) -> str:
     rest = args[1:]
     if sub == "overall":
         if not rest:
-            raise StoreError("Usage: /budget overall 1200 (or /budget overall off)")
+            raise StoreError("Try: overall budget 1500 (or /budget overall off)")
         if rest[0].lower() in ("off", "clear", "none"):
             st.set_limit(None, None, ctx.today)
             return "Overall limit removed."
         cents = _amount(rest[0])
         st.set_limit(None, cents, ctx.today)
-        return f"Overall monthly spending limit set to {fmt(cents)}."
+        return f"Monthly spending limit set to {fmt(cents)}. Tap Today to see what you can spend each day."
     if sub == "set":
         if len(rest) < 2:
-            raise StoreError("Usage: /budget set <category> <amount>")
+            raise StoreError("Try: food budget 400")
+        if " ".join(rest[:-1]).lower() == "overall":
+            return budget(ctx, ["overall", rest[-1]])
         cents = _amount(rest[-1])
         c = _cat(ctx, " ".join(rest[:-1]))
         if c["kind"] == "savings":
             raise StoreError("Savings and investments is an allocation, not spending. Use /goals instead.")
         st.set_limit(c["id"], cents, ctx.today)
-        return f"{c['name']} limit set to {fmt(cents)} per month."
+        return f"{c['name']}: limit set to {fmt(cents)} a month."
     if sub == "clear":
+        if " ".join(rest).lower() == "overall":
+            return budget(ctx, ["overall", "off"])
         c = _cat(ctx, " ".join(rest))
         st.set_limit(c["id"], None, ctx.today)
         return f"{c['name']} limit removed."
@@ -153,7 +122,7 @@ def budget(ctx: Ctx, args: list[str]) -> str:
         return f"Next expected income: {short_date(d)}. Income does not raise your limits."
     if sub == "cooloff":
         if not rest:
-            raise StoreError("Usage: /budget cooloff <amount> [hours] (or off)")
+            raise StoreError("Try: /budget cooloff 100 48 (wait 48 hours before buys of $100+)")
         if rest[0].lower() in ("off", "clear", "none"):
             st.set_setting("cooloff_cents", None)
             return "Cooling-off rule removed."
@@ -164,34 +133,46 @@ def budget(ctx: Ctx, args: list[str]) -> str:
         st.set_setting("cooloff_cents", str(cents))
         st.set_setting("cooloff_hours", hours)
         return f"Cooling-off rule: wait {hours} hours on discretionary purchases of {fmt(cents)} or more."
-    raise StoreError("Unknown /budget option. See /help.")
+    # Shorthand: /budget food 400, /budget food off, /budget 1500 (overall)
+    if len(args) == 1:
+        args = ["overall", args[0]]
+    if args[-1].lower() in ("off", "clear", "none", "remove"):
+        return budget(ctx, ["clear", *args[:-1]])
+    try:
+        parse_cents(args[-1])
+    except MoneyError:
+        raise StoreError("Try: /budget food 400 or /budget overall 1500. /help budget shows more.") from None
+    return budget(ctx, ["set", *args])
 
 
 def budget_overview(ctx: Ctx) -> str:
     s = summarise_month(ctx.store, ctx.today, through=ctx.today)
-    lines = [f"BUDGET | {ctx.today.strftime('%B %Y')}"]
+    days_left = (s.end - ctx.today).days + 1
+    lines = [f"BUDGET · {ctx.today.strftime('%B')} ({days_left} day{'s' if days_left != 1 else ''} left)"]
     if s.overall_limit:
-        lines.append(f"Overall: {fmt(s.net_spending)} of {fmt(s.overall_limit)} ({s.overall_pct}%), "
-                     f"{fmt(s.overall_remaining)} left")
+        lines.append(f"All spending: {fmt(s.overall_remaining)} left of {fmt(s.overall_limit)} "
+                     f"({s.overall_pct}% used)" + (" - limit reached" if s.overall_remaining <= 0 else ""))
     else:
-        lines.append(f"Overall: {fmt(s.net_spending)} spent, no limit set (/budget overall <amount>)")
-    any_limit = False
-    for c in s.categories.values():
-        if c.limit:
-            any_limit = True
-            lines.append(f"{c.name}: {fmt(c.net)} of {fmt(c.limit)} ({c.pct}%), {fmt(c.remaining)} left")
-    if not any_limit:
-        lines.append("No category limits set (/budget set <category> <amount>).")
+        lines.append(f"All spending: {fmt(s.net_spending)} so far, no monthly limit yet")
+    limited = [c for c in s.categories.values() if c.limit]
+    for c in limited:
+        flag = " - over" if c.net > c.limit else (" - limit reached" if c.net == c.limit else "")
+        lines.append(f"{c.name}: {fmt(max(0, c.remaining))} left of {fmt(c.limit)}{flag}")
     dues = due_commitments(ctx.store, ctx.today)
     if dues:
-        lines.append("Unpaid commitments: " + ", ".join(f"{d.name} {fmt(d.amount)} ({short_date(d.due)})" for d in dues))
+        lines.append("Bills still to pay: " + ", ".join(f"{d.name} {fmt(d.amount)} ({short_date(d.due)})" for d in dues))
+    lines.append("")
+    if not s.overall_limit and not limited:
+        lines.append("Set one: overall budget 1500 · food budget 400")
+    else:
+        lines.append("Change: food budget 400 · overall budget 1500 · /help budget")
     return "\n".join(lines)
 
 
 def _category_cmd(ctx: Ctx, rest: list[str]) -> str:
     st = ctx.store
     if not rest:
-        raise StoreError("Usage: /budget category add|rename|disable|enable|move ...")
+        raise StoreError("Try: /budget category add Pets (more: /help budget)")
     action, args = rest[0].lower(), " ".join(rest[1:])
     if action == "add":
         c = st.add_category(args)
@@ -199,7 +180,7 @@ def _category_cmd(ctx: Ctx, rest: list[str]) -> str:
     if action in ("rename", "move"):
         m = re.match(r"(.+?)\s+to\s+(.+)$", args, re.I)
         if not m:
-            raise StoreError(f"Usage: /budget category {action} <old> to <new>")
+            raise StoreError(f"Try: /budget category {action} Travel to Holidays")
         src = _cat(ctx, m.group(1), include_inactive=True)
         if action == "rename":
             st.rename_category(src["id"], m.group(2))
@@ -233,8 +214,7 @@ def _commit_cmd(ctx: Ctx, rest: list[str]) -> str:
     if action == "add":
         m = re.match(r"(.+?)\s+(\S+)\s+(?:day\s+(\d{1,2})|on\s+(\S+))(?:\s+category\s+(.+))?$", args, re.I)
         if not m:
-            raise StoreError("Usage: /budget commit add <name> <amount> day <1-31> | on <YYYY-MM-DD> "
-                             "[category <name>]")
+            raise StoreError("Try: /budget commit add Rent 800 day 1, or /budget commit add Course 300 on 2026-11-15")
         name, cents = m.group(1), _amount(m.group(2))
         if st.resolve_commitment(name) and st.resolve_commitment(name)["name"].lower() == name.lower():
             raise StoreError(f"A commitment named {name} already exists.")
@@ -266,24 +246,37 @@ def accounts(ctx: Ctx, args: list[str]) -> str:
     if not args:
         b = balances(st)
         if not b.configured:
-            return ("No accounts recorded. Transactions still log without one.\n"
-                    "Add: /accounts add Main main 2500 (types: " + ", ".join(ACCOUNT_KINDS) + ")")
-        lines = ["ACCOUNTS (user-maintained figures, not live bank balances)"]
+            return ("No accounts yet. They're optional: spending logs fine without them.\n"
+                    "Add one with its current balance: /accounts add DBS 2500")
+        lines = ["ACCOUNTS (balances you entered, not live bank data)"]
         for name, kind, bal, as_of in b.accounts:
-            lines.append(f"{name} ({kind}): {fmt(bal)}, reconciled {short_date(date.fromisoformat(as_of))}")
-        lines.append(f"Spendable accounts total: {fmt(b.liquid)}" + (f"; protected {fmt(b.protected)}" if b.protected else ""))
-        lines.append("Only transactions logged against an account change its balance.")
+            lines.append(f"{name}: {fmt(bal)} ({kind}, last set {short_date(date.fromisoformat(as_of))})")
+        lines.append(f"Available to spend from: {fmt(b.liquid)}" + (f", of which {fmt(b.protected)} is protected"
+                                                                     if b.protected else ""))
+        lines.append("Correct a balance: /accounts reconcile DBS 2410.50")
         return "\n".join(lines)
     action, rest = args[0].lower(), args[1:]
     if action == "add":
-        if len(rest) < 3 or rest[-2].lower() not in ACCOUNT_KINDS:
-            raise StoreError("Usage: /accounts add <name> <type> <opening balance>. Types: " + ", ".join(ACCOUNT_KINDS))
+        # /accounts add <name> [type] <balance>, or /accounts add <name> <balance> <type>
+        # A type is a lowercase type word ("main"); a capitalised one ("My Savings") is part of the name.
+        def is_type(tok: str) -> bool:
+            return tok in ACCOUNT_KINDS
+
+        if len(rest) >= 3 and is_type(rest[-1]):
+            rest = [*rest[:-2], rest[-1], rest[-2]]
+        if len(rest) >= 3 and is_type(rest[-2]):
+            name, kind = " ".join(rest[:-2]), rest[-2].lower()
+        elif len(rest) >= 2:
+            name, kind = " ".join(rest[:-1]), _guess_kind(" ".join(rest[:-1]))
+        else:
+            raise StoreError("Add an account with its current balance: /accounts add DBS 2500")
         opening = _signed_amount(rest[-1])
-        a = st.add_account(" ".join(rest[:-2]), rest[-2].lower(), opening, ctx.today)
-        return f"Account added: {a['name']} ({a['kind']}), opening balance {fmt(opening)}."
+        a = st.add_account(name, kind, opening, ctx.today)
+        return (f"Added {a['name']} ({a['kind']}) with {fmt(opening)}.\n"
+                f"Use it like: transferred $100 from {a['name']} to Savings")
     if action == "reconcile":
         if len(rest) < 2:
-            raise StoreError("Usage: /accounts reconcile <name> <balance>")
+            raise StoreError("Try: /accounts reconcile DBS 2410.50")
         a = st.resolve_account(" ".join(rest[:-1]))
         if a is None:
             raise StoreError(f"No account named '{' '.join(rest[:-1])}'.")
@@ -298,7 +291,16 @@ def accounts(ctx: Ctx, args: list[str]) -> str:
             raise StoreError(f"No account named '{' '.join(rest)}'.")
         st.deactivate_account(a["id"])
         return f"Account removed from tracking: {a['name']}. Its history is kept."
-    raise StoreError("Unknown /accounts option. Use add, reconcile or remove.")
+    raise StoreError("Try: /accounts add DBS 2500 · /accounts reconcile DBS 2410.50 · /help accounts")
+
+
+def _guess_kind(name: str) -> str:
+    n = name.lower()
+    for word, kind in (("saving", "savings"), ("invest", "investment"), ("brokerage", "investment"),
+                       ("cash", "cash"), ("wallet", "cash"), ("spend", "spending")):
+        if word in n:
+            return kind
+    return "main"
 
 
 def _signed_amount(tok: str) -> int:
@@ -306,8 +308,8 @@ def _signed_amount(tok: str) -> int:
     t = tok[1:] if neg else tok
     try:
         c = parse_cents(t, allow_zero=True)
-    except MoneyError as exc:
-        raise StoreError(f"'{tok}' is not a valid amount ({exc}).") from None
+    except MoneyError:
+        raise StoreError(f"'{tok}' isn't an amount I can use. Write it like 12 or 12.50.") from None
     return -c if neg else c
 
 
@@ -318,8 +320,8 @@ def goals(ctx: Ctx, args: list[str]) -> str:
         gs = goal_statuses(st, ctx.today)
         prot = int(st.get_setting("protected_cents", "0") or 0)
         if not gs and not prot:
-            return ("No savings goals or protected funds set.\n"
-                    "Add: /goals add Emergency 5000 monthly 300 account Savings\nProtect: /goals protect 2000")
+            return ("No savings goals yet. They're optional.\n"
+                    "Add one: /goals add Emergency 5000\nMore options: /help goals")
         lines = ["GOALS"]
         for g in gs:
             line = f"{g.name}: target {fmt(g.target)}"
@@ -337,7 +339,7 @@ def goals(ctx: Ctx, args: list[str]) -> str:
     if action == "add":
         m = re.match(r"(.+?)\s+(\S+)(?:\s+monthly\s+(\S+))?(?:\s+account\s+(.+?))?(?:\s+by\s+(\S+))?$", rest, re.I)
         if not m:
-            raise StoreError("Usage: /goals add <name> <target> [monthly <amount>] [account <name>] [by YYYY-MM-DD]")
+            raise StoreError("Try: /goals add Emergency 5000 (more options: /help goals)")
         name = m.group(1)
         if any(g["name"].lower() == name.lower() for g in st.goals()):
             raise StoreError(f"A goal named {name} already exists.")
@@ -363,7 +365,7 @@ def goals(ctx: Ctx, args: list[str]) -> str:
         cents = _amount(rest)
         st.set_setting("protected_cents", str(cents))
         return f"Protected funds: {fmt(cents)}. KRONA will never count this as spendable."
-    raise StoreError("Unknown /goals option. Use add, remove or protect.")
+    raise StoreError("Try: /goals add Emergency 5000 · /goals remove Emergency · /help goals")
 
 
 # ------------------------------------------------------------------------------ /history
@@ -374,8 +376,9 @@ def history(ctx: Ctx, args: list[str]) -> str:
         n = max(1, min(50, int(args[-1])))
     rows = ctx.store.recent(n, include_inactive=show_all)
     if not rows:
-        return "No transactions recorded yet."
-    return "Recent entries\n" + "\n".join(tx_line(ctx.store, r, show_status=show_all) for r in rows)
+        return "Nothing logged yet. Type what you spent, like: lunch 12"
+    return ("RECENT ENTRIES\n" + "\n".join(tx_line(ctx.store, r, show_status=show_all) for r in rows)
+            + "\n\nFix one: /edit 3 15.20 (the # number) · Undo removes the latest")
 
 
 # ------------------------------------------------------------------------------ /undo
@@ -384,16 +387,16 @@ def undo(ctx: Ctx, args: list[str]) -> str:
     if args and args[0].lstrip("#").isdigit():
         t = st.tx(int(args[0].lstrip("#")))
         if t is None or t["status"] != "active":
-            raise StoreError(f"No active entry #{args[0].lstrip('#')}.")
+            raise StoreError(f"There's no entry #{args[0].lstrip('#')} to undo. Check History for the number.")
         return do_reverse(ctx, t["id"])
     if args:
         rows = st.search_active(" ".join(args), limit=5)
         if not rows:
-            raise StoreError(f"No active entry matches '{' '.join(args)}'.")
+            raise StoreError(f"Nothing matches '{' '.join(args)}'. Check History.")
         if len(rows) > 1:
             st.set_pending("choose_undo", {"ids": [r["id"] for r in rows]})
-            return "Which one? Reply with the number.\n" + "\n".join(
-                f"{i}. {tx_line(st, r)}" for i, r in enumerate(rows, start=1))
+            return "Which one should I undo? Tap its number.\n" + "\n".join(
+                f"{i}. {_brief(st, r)}" for i, r in enumerate(rows, start=1))
         target = rows[0]
     else:
         recent = st.recent(1)
@@ -401,17 +404,22 @@ def undo(ctx: Ctx, args: list[str]) -> str:
             raise StoreError("Nothing to undo.")
         target = recent[0]
     st.set_pending("confirm_undo", {"id": target["id"]})
-    return f"Reverse {tx_line(st, target)}? Reply yes or no."
+    return f"Undo this entry?\n{_brief(st, target)}"
+
+
+def _brief(st: Store, t) -> str:
+    sign = {"income": "+", "refund": "+"}.get(t["type"], "")
+    return f"{t['description']} {sign}{fmt(t['total_cents'])} · {short_date(date.fromisoformat(t['effective_date']))}"
 
 
 def do_reverse(ctx: Ctx, tx_id: int) -> str:
     st = ctx.store
     t = st.tx(tx_id)
-    reply = f"Reversed. {tx_line(st, t)}"
+    reply = f"Undone: {_brief(st, t)}. It no longer counts."
     if t["type"] == "expense":
         linked = st.refunded_total(tx_id)
         if linked:
-            reply += f"\nNote: {fmt(linked)} of refunds linked to this purchase remain recorded."
+            reply += f"\nNote: {fmt(linked)} of refunds linked to this purchase are still recorded."
     st.reverse(tx_id, ctx.update_id, ctx.chat_id, reply)
     return reply
 
@@ -422,29 +430,68 @@ FIELDS = {"amount": "amount", "total": "amount", "price": "price", "unitprice": 
           "name": "description", "category": "category", "cat": "category", "date": "date"}
 
 
+def _normalise_edit(ctx: Ctx, args: list[str]) -> list[str] | None:
+    """Accept the forms people try and turn them into [id, field, value...].
+
+    /edit 15.20               last entry's amount
+    /edit 3 15.20             entry #3's amount
+    /edit lunch 15.20         latest entry matching "lunch"
+    /edit lunch category food latest "lunch" entry, any field
+    /edit 3 amount 15.20      the full form
+    """
+    st = ctx.store
+    if not args:
+        return None
+    is_id = args[0].lstrip("#").isdigit() and len(args) >= 2
+    if is_id:
+        target, rest = args[0].lstrip("#"), args[1:]
+    else:
+        idx = next((i for i, a in enumerate(args) if a.lower() in FIELDS or a.lower() == "item"), None)
+        if idx is not None:
+            words, rest = args[:idx], args[idx:]
+        else:
+            words, rest = args[:-1], args[-1:]
+        if words:
+            rows = st.search_active(" ".join(words), limit=1)
+            if not rows:
+                raise StoreError(f"Nothing matches '{' '.join(words)}'. Check History for the entry's # number.")
+        else:
+            rows = st.recent(1)
+            if not rows:
+                raise StoreError("Nothing to edit yet.")
+        target = str(rows[0]["id"])
+    if len(rest) == 1:
+        rest = ["amount", rest[0]]
+    return [target, *rest]
+
+
 def edit(ctx: Ctx, args: list[str]) -> str:
     st = ctx.store
-    if len(args) < 3 or not args[0].lstrip("#").isdigit():
+    norm = _normalise_edit(ctx, args)
+    if norm is None or len(norm) < 3:
         recent = st.recent(5)
-        lines = ["Usage: /edit <id> <field> <value>",
-                 "Fields: amount, price, quantity, description, category, date",
-                 "Example: /edit 12 amount 15.20"]
+        lines = ["Fix an entry:",
+                 "/edit 15.20: change the last entry's amount",
+                 "/edit lunch 15.20: change the last 'lunch' entry",
+                 "/edit 3 category Transport: change entry #3 (also: date, description, quantity, price)"]
         if recent:
             lines += ["", "Recent entries"] + [tx_line(st, r) for r in recent]
         return "\n".join(lines)
+    args = norm
     tx_id = int(args[0].lstrip("#"))
     t = st.tx(tx_id)
     if t is None or t["status"] != "active":
-        raise StoreError(f"No active entry #{tx_id}. Only active entries can be edited.")
+        raise StoreError(f"There's no entry #{tx_id} to edit. Check History for the number.")
     rest = args[1:]
     line_no = None
     if rest[0].lower() == "item":
         if len(rest) < 4 or not rest[1].isdigit():
-            raise StoreError("Usage: /edit <id> item <n> <field> <value>")
+            raise StoreError("Try: /edit 3 item 2 quantity 3")
         line_no, rest = int(rest[1]), rest[2:]
     field = FIELDS.get(rest[0].lower())
     if field is None:
-        raise StoreError("Field must be one of: amount, price, quantity, description, category, date.")
+        raise StoreError("I can change: amount, price, quantity, description, category or date. "
+                         "Example: /edit 3 category Transport")
     value = " ".join(rest[1:]).strip()
     items = st.items(tx_id)
     new_items = [ItemDraft(i["description"], i["quantity"], i["line_total_cents"], i["unit_price_cents"],
@@ -511,7 +558,7 @@ def edit(ctx: Ctx, args: list[str]) -> str:
 
     def make_reply(new_id: int) -> str:
         body = confirmation(d, new_id, ctx.today).split("\n", 1)[1]
-        return f"Corrected. #{new_id} replaces #{tx_id}.\n{body}"
+        return f"Fixed.\n{body}"
 
     new_id = st.correct(tx_id, d, changes, ctx.update_id, ctx.chat_id, make_reply)
     return make_reply(new_id)
@@ -529,7 +576,7 @@ def report_cmd(ctx: Ctx, args: list[str]) -> str:
             if month > ctx.today:
                 raise StoreError("That month has not started.")
         else:
-            raise StoreError("Usage: /report, /report last or /report 2026-09")
+            raise StoreError("Try: /report, /report last or /report 2026-09")
     return report.build_report(ctx.store, ctx.today, month)
 
 

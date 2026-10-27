@@ -68,7 +68,7 @@ def _tighten_section(store: Store, today: date) -> tuple[list[str], str | None]:
     days_left = days_in_month(today) - today.day + 1
     limited = [c for c in s.categories.values() if c.limit and is_consumption(c.kind)]
     if not limited and not s.overall_limit:
-        return ["No limits set, so nothing can be measured. Set one with /budget set Food 400."], None
+        return ["No limits set yet, so there is nothing to measure. Try: food budget 400"], None
     worst = None
     worst_score = -1
     for c in limited:

@@ -92,6 +92,7 @@ class FakeBotAPI:
         self.pending: list[dict] = []
         self.sent: list[dict] = []
         self.offsets: list = []
+        self.commands: list = []
         self.lock = threading.Lock()
         api = self
 
@@ -111,6 +112,9 @@ class FakeBotAPI:
                         if off is not None:
                             api.pending = [u for u in api.pending if u["update_id"] >= off]
                         return self._reply({"ok": True, "result": list(api.pending)})
+                    if method == "setMyCommands":
+                        api.commands = body["commands"]
+                        return self._reply({"ok": True, "result": True})
                     if method == "sendMessage":
                         api.sent.append(body)
                         return self._reply({"ok": True, "result": {"message_id": len(api.sent)}})
@@ -164,10 +168,14 @@ def test_runtime_end_to_end_against_local_bot_api(tmp_path):
     assert texts[1] == "Logged.\nProtein milk, 2 bottles, $7.60"
     assert texts[2].startswith("Logged.\nGroceries, 1 purchase, $75.00\nBudget warning: Food and groceries is at 82%")
     assert texts[3] == "This is a private finance bot. Access denied."
+    # The "/" menu is registered, replies carry the button menu, and strangers get no buttons.
+    assert [c["command"] for c in api.commands][:3] == ["today", "report", "budget"]
+    assert api.sent[1]["reply_markup"]["keyboard"][0] == ["Today", "Report", "Budget"]
+    assert "reply_markup" not in api.sent[3]
     # Restart with the same updates still on the server (e.g. offset never acknowledged): no duplicates.
     api.push(2, "Bought 2 bottles of protein milk at $3.80 each")
     api.push(5, "/history")
-    _run_bot(tmp_path, api, clock, until=lambda: any("Recent entries" in m["text"] for m in api.sent))
+    _run_bot(tmp_path, api, clock, until=lambda: any("RECENT ENTRIES" in m["text"] for m in api.sent))
     from krona.db import open_db
     conn = open_db(tmp_path / "krona.sqlite3")
     assert conn.execute("SELECT COUNT(*) n FROM transactions").fetchone()["n"] == 2

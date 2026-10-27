@@ -21,6 +21,7 @@ from .parser import looks_hypothetical, parse, parse_query
 from .store import Store, StoreError, TxDraft
 from .telegram import Sender, TelegramSendError
 from .timeutil import Clock, period_key
+from .ui import MAIN_KEYBOARD, YES_NO_KEYBOARD, budget_phrase, choice_keyboard, keyword_command
 
 log = logging.getLogger("krona.bot")
 
@@ -28,7 +29,7 @@ YES = {"yes", "y", "yep", "yeah", "confirm", "ok", "okay", "log it", "yes log it
 NO = {"no", "n", "nope", "cancel", "stop", "never mind", "nevermind", "don't", "dont"}
 UNAUTHORISED_REPLY = "This is a private finance bot. Access denied."
 DB_FAILURE_REPLY = "Not saved. The database could not record this, so nothing was logged. Please try again."
-COMMANDS = ("start", "help", "report", "budget", "history", "undo", "edit", "accounts", "goals")
+COMMANDS = ("start", "help", "today", "report", "budget", "history", "undo", "edit", "accounts", "goals")
 
 
 class Krona:
@@ -64,7 +65,7 @@ class Krona:
         if prior is not None:
             # Retry of an update we already handled: never redo side effects.
             if prior["reply_state"] in ("pending", "failed") and prior["response_text"]:
-                self._deliver(store, update_id, chat_id, prior["response_text"])
+                self._deliver(store, update_id, chat_id, prior["response_text"], MAIN_KEYBOARD)
             return
         if not isinstance(text, str) or not text.strip():
             store.record_processed(update_id, chat_id, None)
@@ -87,7 +88,19 @@ class Krona:
             log.exception("could not record processed update; replying anyway")
             self._send_raw(chat_id, reply)
             return
-        self._deliver(store, update_id, chat_id, reply)
+        self._deliver(store, update_id, chat_id, reply, self._keyboard(store))
+
+    def _keyboard(self, store: Store) -> dict:
+        """Yes/No or numbered buttons while KRONA waits for an answer; the main menu otherwise."""
+        try:
+            pending = store.get_pending()
+        except sqlite3.Error:
+            return MAIN_KEYBOARD
+        if pending and pending[0] in ("confirm_duplicate", "confirm_undo"):
+            return YES_NO_KEYBOARD
+        if pending and pending[0] == "choose_undo":
+            return choice_keyboard(len(pending[1]["ids"]))
+        return MAIN_KEYBOARD
 
     def _recover_after_db_error(self, store: Store, update_id: int) -> str:
         """Before claiming failure, check whether the write actually committed."""
@@ -109,9 +122,9 @@ class Krona:
         except TelegramSendError as exc:
             log.warning("send failed: %s", exc)
 
-    def _deliver(self, store: Store, update_id: int, chat_id: int, text: str) -> None:
+    def _deliver(self, store: Store, update_id: int, chat_id: int, text: str, keyboard: dict | None = None) -> None:
         try:
-            self.sender.send(chat_id, text)
+            self.sender.send(chat_id, text, keyboard)
         except TelegramSendError as exc:
             log.warning("reply delivery %s: %s", "uncertain" if exc.uncertain else "failed", exc)
             store.mark_reply(update_id, "uncertain" if exc.uncertain else "failed")
@@ -122,7 +135,7 @@ class Krona:
         """Re-send replies that definitely failed earlier (never 'uncertain' ones, to avoid duplicates)."""
         store = Store(self.conn, self.authorised_user_id)
         for row in store.unsent_replies():
-            self._deliver(store, row["update_id"], row["chat_id"], row["response_text"])
+            self._deliver(store, row["update_id"], row["chat_id"], row["response_text"], MAIN_KEYBOARD)
 
     # ------------------------------------------------------------------ routing
     def route(self, ctx: Ctx, text: str) -> str:
@@ -134,17 +147,28 @@ class Krona:
             out = self.handle_pending(ctx, text, *pending)
             if out is not None:
                 return out
+        # Plain words and button taps ("help", "undo", "Report") mean the command.
+        cmd = keyword_command(text)
+        if cmd == "month":
+            return report.category_spending(ctx.store, ctx.today, None, None)
+        if cmd is not None:
+            return self.command(ctx, "/" + cmd)
+        phrase = budget_phrase(text)
+        if phrase is not None:
+            return commands.budget(ctx, [*phrase[0].split(), phrase[1]])
         return self.natural(ctx, text)
 
     def command(self, ctx: Ctx, text: str) -> str:
         head, *args = text.split()
         name = head[1:].split("@", 1)[0].lower()
         if name not in COMMANDS:
-            return "Unknown command. /help lists what works."
+            return "I don't know that command. Tap Help to see what works."
         if name == "start":
             return commands.start(ctx)
         if name == "help":
-            return commands.HELP
+            return commands.help_text(args)
+        if name == "today":
+            return report.today_summary(ctx.store, ctx.today)
         if name == "report":
             return commands.report_cmd(ctx, args)
         if name == "budget":
@@ -168,7 +192,7 @@ class Krona:
                 return self.commit(ctx, TxDraft.from_json(payload["draft"]), skip_duplicate=True)
             if low in NO:
                 st.clear_pending()
-                return "Not logged."
+                return "OK, not logged again."
             st.clear_pending()
             return None
         if kind == "confirm_undo":
@@ -179,7 +203,7 @@ class Krona:
                     return "That entry is no longer active. Nothing changed."
                 return commands.do_reverse(ctx, t["id"])
             if low in NO:
-                return "Nothing changed."
+                return "OK, kept it."
             return None
         if kind == "choose_undo":
             st.clear_pending()
@@ -189,12 +213,14 @@ class Krona:
                     return "That entry is no longer active. Nothing changed."
                 return commands.do_reverse(ctx, t["id"])
             if low in NO:
-                return "Nothing changed."
+                return "OK, nothing changed."
             return None
         if kind == "clarify":
             st.clear_pending()
             if low in NO:
                 return "Cancelled. Nothing was logged."
+            if keyword_command(text) is not None or text.startswith("/"):
+                return None  # the user moved on (tapped a button): drop the question
             combined = f"{payload['text']}\n(Answer to \"{payload['question']}\": {text})"
             return self.natural(ctx, combined, original=payload["text"], answer=text,
                                 pending_question=payload["question"])
@@ -243,16 +269,14 @@ class Krona:
                 pending_question: str | None = None) -> str:
         plan, degraded = self.interpret(ctx, text, original, answer, pending_question)
         if plan is None:
-            if self.interpreter is None:
-                return ("KRONA could not interpret that. Without the language service only simple phrasings work, "
-                        "e.g. 'Spent $12 on lunch' or 'Received $900 internship pay'. Nothing was logged.")
+            examples = "Try: lunch 12 · received $900 pay · should i buy shoes for $120?"
             if degraded:
-                return ("KRONA could not interpret that reliably right now (language service unavailable). "
-                        "Nothing was logged. Retry shortly, or use a simple form: 'Spent $12 on lunch'.")
-            return "KRONA could not interpret that. Nothing was logged."
+                return ("I couldn't reach my language service, so nothing was logged.\n"
+                        "Simple entries still work: lunch 12")
+            return f"I didn't understand that, so nothing was logged.\n{examples}"
         if isinstance(plan, Hypothetical):
-            return ("That reads as a question or a plan, so nothing was logged. If you already paid, "
-                    "say it plainly, e.g. 'Spent $40 on dinner'.")
+            return ("Sounds like a question or a plan, so nothing was logged.\n"
+                    "If you already paid, type it like: dinner 40")
         if isinstance(plan, Clarify):
             question = plan.question
             if plan.from_model and not _no_new_numbers(question, text):
@@ -264,7 +288,7 @@ class Krona:
         if isinstance(plan, Other):
             if plan.reply and _no_new_numbers(plan.reply, text):
                 return plan.reply
-            return "I log spending and income, answer 'should i buy', and report with /report. /help lists examples."
+            return "Type what you spent, like: lunch 12. Tap Help for more."
 
         if isinstance(plan, PurchaseQ):
             return self.purchase(ctx, plan, original or text)
@@ -280,8 +304,8 @@ class Krona:
             dup = st.find_recent_duplicate(draft)
             if dup is not None:
                 st.set_pending("confirm_duplicate", {"draft": draft.to_json()}, minutes=15)
-                return (f"This matches an entry logged moments ago: {tx_line(st, dup)}. "
-                        "Log it again as a separate purchase? Reply yes or no.")
+                return (f"You logged {dup['description']} {fmt(dup['total_cents'])} a moment ago.\n"
+                        "Log it again as a second purchase?")
         commitment_ids = []
         if draft.type == "expense":
             desc = draft.description.lower()

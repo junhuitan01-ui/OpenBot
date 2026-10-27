@@ -74,8 +74,8 @@ def test_refund_exceeding_original_asks(h):
 
 def test_reversal(h):
     h.say("Spent $12 on lunch")
-    assert "Reply yes or no" in h.say("/undo")
-    assert h.say("yes").startswith("Reversed. #1")
+    assert h.say("/undo") == "Undo this entry?\nLunch $12.00 · 10 Oct"
+    assert h.say("yes") == "Undone: Lunch $12.00 · 10 Oct. It no longer counts."
     assert h.tx_count("active") == 0 and h.tx_count("reversed") == 1
 
 
@@ -114,7 +114,7 @@ def test_clarification_can_be_cancelled(h):
 
 def test_ambiguous_message_not_logged(h):
     reply = h.say("lunch was expensive")
-    assert "Nothing was logged" in reply and h.tx_count() == 0
+    assert "nothing was logged" in reply and h.tx_count() == 0
 
 
 def test_conflicting_total_asks(hc):
@@ -189,7 +189,7 @@ def test_claude_invented_quantity_rejected(hc):
 def test_claude_timeout_fails_safely(hc):
     hc.interpreter.push(InterpreterUnavailable("Claude timed out"))
     reply = hc.say("grabbed a bite with friends, it was about thirty bucks")
-    assert "Nothing was logged" in reply and "unavailable" in reply
+    assert "nothing was logged" in reply and "couldn't reach my language service" in reply
     assert hc.tx_count() == 0
 
 
@@ -213,7 +213,7 @@ def test_uncategorised_is_explicit(h):
 def test_correction_via_edit(h):
     h.say("Spent $12 on lunch")
     reply = h.say("/edit 1 amount 15.20")
-    assert reply == "Corrected. #2 replaces #1.\nLunch, 1 purchase, $15.20"
+    assert reply == "Fixed.\nLunch, 1 purchase, $15.20"
     assert h.tx_count("active") == 1 and h.tx_count("corrected") == 1
 
 
@@ -228,7 +228,7 @@ def test_hypothetical_backstop_even_if_claude_says_transaction(hc):
 def test_model_prose_cannot_introduce_figures(hc):
     hc.interpreter.push({"intent": "other", "transaction": None, "purchase": None, "query": None,
                          "clarification_question": None, "reply": "You have $500 left this month."})
-    assert "$500" not in hc.say("hello")
+    assert "$500" not in hc.say("thanks for that")
     hc.interpreter.push({"intent": "clarify", "transaction": None, "purchase": None, "query": None,
                          "clarification_question": "Was it $14?", "reply": None})
     assert hc.say("had lunch") == "What was the total amount paid?"

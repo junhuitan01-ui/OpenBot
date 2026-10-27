@@ -18,18 +18,18 @@ def _status(cu: CategoryUsage, today: date, current: bool) -> str:
         return "no limit"
     p = cu.pct or 0
     if p >= 100:
-        return "OVER" if cu.net > cu.limit else "LIMIT REACHED"
+        return f"over by {fmt(cu.net - cu.limit)}" if cu.net > cu.limit else "limit reached"
     if current and projected(cu.net, today) > cu.limit and p >= 50:
-        return "projected over"
+        return "on track to go over"
     if p >= 90:
-        return "strong warning"
+        return "almost used up"
     if p >= 75:
-        return "caution"
-    return "ok"
+        return "getting close"
+    return "on track"
 
 
 def _needs_attention(cu: CategoryUsage, today: date, current: bool) -> bool:
-    return _status(cu, today, current) in ("OVER", "LIMIT REACHED", "projected over", "strong warning", "caution")
+    return _status(cu, today, current) not in ("on track", "no limit")
 
 
 def _norm_desc(d: str) -> str:
@@ -81,123 +81,130 @@ def patterns(s: MonthSummary, store: Store, today: date, current: bool) -> list[
 
 
 def allowance_lines(a: Allowance) -> list[str]:
-    """Shared 'free to spend' explanation used by the briefing and 'how much can I spend today'."""
+    """Shared 'free to spend' explanation used by Today, the briefing and the report."""
     if a.status == "unavailable":
-        return ["Not available: no spending limits are set. Set one with /budget overall <amount>."]
+        return ["Not worked out yet: set a monthly limit first (e.g. overall budget 1500)."]
     if a.status == "provisional":
-        lines = ["Provisional: no overall limit is set, so there is no single daily figure."]
+        lines = ["No overall monthly limit yet, so only per-category figures:"]
         for name, per_day in a.category_daily[:4]:
-            lines.append(f"{name}: up to {fmt(per_day)}/day.")
+            lines.append(f"{name}: up to {fmt(per_day)} a day")
         for name in a.exhausted_categories:
-            lines.append(f"{name}: limit used up. Spend nothing there.")
+            lines.append(f"{name}: used up, spend nothing there")
         return lines
     if a.status == "exhausted":
-        why = "cash on record after commitments" if a.binding == "cash" else "the overall limit after commitments"
-        return [f"{fmt(0)}. Nothing discretionary is left in {why}.",
-                "Cover essentials only; do not use committed or protected money."]
-    lines = [f"{fmt(a.amount)}" + (f" ({fmt(a.remaining_today)} left after today's spending)."
-                                    if a.spent_today else ".")]
-    basis = f"{fmt(max(0, a.overall_left))} left in the overall limit over {a.days_left} days"
-    if a.committed:
-        basis += f", after {fmt(a.committed)} in unpaid commitments"
-    lines.append(basis + ".")
+        why = "your balances, after bills and protected money" if a.binding == "cash" else "this month's limit"
+        return [f"{fmt(0)}. Nothing is left in {why}.", "Essentials only; don't touch money set aside for bills."]
+    head = f"{fmt(a.amount)} today"
+    if a.spent_today:
+        head += f" ({fmt(a.remaining_today)} still free after today's spending)"
+    lines = [head, f"That's {fmt(max(0, a.overall_left))} left this month spread over {a.days_left} days"
+             + (f", after setting aside {fmt(a.committed)} for bills" if a.committed else "") + "."]
     if a.binding == "cash":
-        lines.append(f"Capped by recorded balances: {fmt(max(0, a.cash_available or 0))} available.")
+        lines.append(f"Lowered to fit your balances: {fmt(max(0, a.cash_available or 0))} available.")
     lines.extend(a.notes)
     for name in a.exhausted_categories:
-        lines.append(f"{name}: limit used up. Spend nothing there.")
+        lines.append(f"{name}: used up, spend nothing there")
     for name, per_day in a.tight_categories[:3]:
-        lines.append(f"{name}: no more than {fmt(per_day)} today.")
+        lines.append(f"{name}: keep it under {fmt(per_day)} today")
     return lines
+
+
+def today_summary(store: Store, today: date) -> str:
+    rows = [r for r in store.active_between(today, today)]
+    spent = [r for r in rows if r["type"] == "expense" and is_consumption(r["category_kind"])]
+    total = sum(r["total_cents"] for r in spent) - sum(
+        r["total_cents"] for r in rows if r["type"] == "refund" and is_consumption(r["category_kind"]))
+    lines = [f"TODAY · {short_date(today)}"]
+    if spent:
+        lines.append(f"Spent {fmt(total)}: " + ", ".join(f"{r['description']} {fmt(r['total_cents'])}"
+                                                       for r in spent[:6]) + ("..." if len(spent) > 6 else ""))
+    else:
+        lines.append("Nothing logged today yet.")
+    lines += ["", "FREE TO SPEND", *allowance_lines(compute_allowance(store, today))]
+    return "\n".join(lines)
 
 
 def build_report(store: Store, today: date, month: date | None = None) -> str:
     m = month or today
     current = month_bounds(m) == month_bounds(today)
     s = summarise_month(store, m, through=today if current else None)
-    title = m.strftime("%B %Y")
-    out: list[str] = [f"KRONA | REPORT | {title}" + (f" (to {short_date(today)})" if current else "")]
+    title = m.strftime("%B %Y").upper()
+    out: list[str] = [f"KRONA REPORT · {title}" + (f" · to {short_date(today)}" if current else "")]
 
     # 1. Overview
-    ov = ["FINANCIAL OVERVIEW",
-          f"Income received: {fmt(s.income)}",
-          f"Consumption spending: {fmt(s.gross_spending)} gross"
-          + (f", {fmt(s.net_spending)} net of {fmt(s.refunds)} refunds" if s.refunds else ""),
-          f"Net cash flow: {fmt(s.net_cash_flow)}"]
-    if s.savings_outflows:
-        ov.append(f"Savings/investment outflows: {fmt(s.savings_outflows)} (allocation, not consumption)")
-    if s.transfers_total:
-        ov.append(f"Transfers between own accounts: {fmt(s.transfers_total)} (excluded from income and spending"
-                  + (f"; {fmt(s.transfers_to_savings)} into savings/investment" if s.transfers_to_savings else "")
-                  + ")")
+    spent = f"Spent: {fmt(s.net_spending)}" + (f" (after {fmt(s.refunds)} refunds)" if s.refunds else "")
+    net = s.net_cash_flow
+    ov = ["OVERVIEW", spent, f"Income: {fmt(s.income)}",
+          f"Net: {'+' if net > 0 else ''}{fmt(net)} (income minus everything paid out)"]
     if s.overall_limit:
-        ov.append(f"Overall limit: {fmt(s.overall_limit)} | used {s.overall_pct}% | remaining "
-                  f"{fmt(s.overall_remaining)}")
+        ov.append(f"Monthly limit: {fmt(s.overall_limit)}, {fmt(s.overall_remaining)} left ({s.overall_pct}% used)")
     else:
-        ov.append("Overall limit: not set (/budget overall <amount>)")
-    if s.reversed_count or s.corrected_count:
-        ov.append(f"Reversed entries: {s.reversed_count}; corrected entries: {s.corrected_count} (excluded)")
+        ov.append("Monthly limit: not set (type: overall budget 1500)")
+    if s.savings_outflows:
+        ov.append(f"Put into savings/investments: {fmt(s.savings_outflows)} (not counted as spending)")
+    if s.transfers_total:
+        ov.append(f"Moved between your accounts: {fmt(s.transfers_total)} (not counted as spending or income)")
+    if s.reversed_count:
+        ov.append(f"Undone entries: {s.reversed_count} (not counted)")
     if s.unlinked_refunds:
-        ov.append(f"Refunds not linked to a purchase: {fmt(s.unlinked_refunds)}")
+        ov.append(f"Refunds not matched to a purchase: {fmt(s.unlinked_refunds)}")
     bal = balances(store)
     if bal.configured:
-        ov.append("Balances (user-maintained, not live bank data):")
-        for name, kind, b, as_of in bal.accounts:
-            ov.append(f"  {name} ({kind}): {fmt(b)}, reconciled {short_date(date.fromisoformat(as_of))}")
+        ov.append("Balances (as you entered them, not live bank data): "
+                  + ", ".join(f"{name} {fmt(b)}" for name, _, b, _ in bal.accounts))
     else:
-        ov.append("Balances: no accounts recorded (/accounts add).")
+        ov.append("Balances: none added (optional: /accounts add DBS 2500)")
     if s.tx_count == 0:
-        ov.append("No transactions recorded for this period.")
+        ov.append("Nothing logged for this month.")
     out.append("\n".join(ov))
 
     # 2. Attention
     limited = [c for c in s.categories.values() if c.limit and is_consumption(c.kind)]
     attention = [c for c in limited if _needs_attention(c, today, current)]
-    att = ["CATEGORIES NEEDING ATTENTION"]
+    att = ["NEEDS ATTENTION"]
     if not limited:
-        att.append("No category limits set (/budget set <category> <amount>).")
+        att.append("No category limits yet (type: food budget 400).")
     elif not attention:
-        att.append("None. All limited categories are within pace.")
+        att.append("Nothing. Every category with a limit is on track.")
     for c in sorted(attention, key=lambda c: c.pct or 0, reverse=True):
-        att.append(f"{c.name}: {fmt(c.net)} of {fmt(c.limit)} ({c.pct}%), {_status(c, today, current)}")
+        att.append(f"{c.name}: {fmt(c.net)} of {fmt(c.limit)} used, {_status(c, today, current)}")
     out.append("\n".join(att))
 
     # 3. Remaining budget
-    rem = ["REMAINING BUDGET"]
+    rem = ["BY CATEGORY"]
     for c in sorted(s.categories.values(), key=lambda c: c.id):
         if not is_consumption(c.kind) or (c.limit is None and c.net == 0):
             continue
         if c.limit:
-            rem.append(f"{c.name}: spent {fmt(c.net)} | limit {fmt(c.limit)} | left {fmt(c.remaining)} | "
-                       f"{c.pct}% | {_status(c, today, current)}")
+            rem.append(f"{c.name}: {fmt(c.net)} spent, {fmt(max(0, c.remaining))} left of {fmt(c.limit)} "
+                       f"({_status(c, today, current)})")
         else:
-            rem.append(f"{c.name}: spent {fmt(c.net)} | no limit")
+            rem.append(f"{c.name}: {fmt(c.net)} spent (no limit)")
     if current:
         dues = due_commitments(store, today)
         if dues:
-            rem.append("Unpaid commitments: " + ", ".join(
-                f"{d.name} {fmt(d.amount)} {'overdue since' if d.overdue else 'due'} {short_date(d.due)}"
+            rem.append("Bills still to pay: " + ", ".join(
+                f"{d.name} {fmt(d.amount)} ({'overdue since' if d.overdue else 'due'} {short_date(d.due)})"
                 for d in dues))
-        goals = goal_statuses(store, today)
-        for g in goals:
+        for g in goal_statuses(store, today):
             line = f"Goal {g.name}: target {fmt(g.target)}"
             if g.progress is not None:
-                line += f", account balance {fmt(g.progress)}"
+                line += f", {fmt(g.progress)} saved"
             if g.monthly:
-                line += f", {fmt(g.contributed_this_month or 0)} of {fmt(g.monthly)} allocated this month"
+                line += f", {fmt(g.contributed_this_month or 0)} of {fmt(g.monthly)} put aside this month"
             rem.append(line)
         a = compute_allowance(store, today)
-        rem.append("Estimated discretionary today: " + " ".join(allowance_lines(a)))
+        rem.append("Free to spend today: " + " ".join(allowance_lines(a)))
     if len(rem) == 1:
-        rem.append("Nothing to show yet.")
+        rem.append("Nothing spent yet.")
     out.append("\n".join(rem))
 
     # 4. Patterns
     pats = patterns(s, store, today, current)
-    out.append("SPENDING PATTERNS\n" + ("\n".join(pats) if pats else "Not enough data for patterns yet."))
+    out.append("PATTERNS\n" + ("\n".join(pats) if pats else "Not enough entries yet to spot patterns."))
 
     # 5. Actions
-    out.append("RECOMMENDED NEXT ACTIONS\n" + "\n".join(recommendations(store, s, today, current)))
+    out.append("WHAT TO DO\n" + "\n".join(recommendations(store, s, today, current)))
     return "\n\n".join(out)
 
 

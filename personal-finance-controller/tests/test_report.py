@@ -11,21 +11,21 @@ TODAY = date(2026, 10, 10)
 
 def test_empty_database(h):
     r = h.say("/report")
-    assert "Income received: $0.00" in r and "No transactions recorded for this period." in r
-    assert "Overall limit: not set" in r and "Balances: no accounts recorded" in r
+    assert "Income: $0.00" in r and "Nothing logged for this month." in r
+    assert "Monthly limit: not set" in r and "Balances: none added" in r
 
 
 def test_income_without_spending(h):
     h.say("Received $900 internship pay")
     r = h.say("/report")
-    assert "Income received: $900.00" in r and "Consumption spending: $0.00 gross" in r
-    assert "Net cash flow: $900.00" in r
+    assert "Income: $900.00" in r and "Spent: $0.00" in r
+    assert "Net: +$900.00" in r
 
 
 def test_spending_without_income(h):
     h.say("Spent $50 on lunch")
     r = h.say("/report")
-    assert "Income received: $0.00" in r and "Net cash flow: -$50.00" in r
+    assert "Income: $0.00" in r and "Net: -$50.00" in r
 
 
 def test_refunds_and_reversals(h):
@@ -34,22 +34,22 @@ def test_refunds_and_reversals(h):
     h.say("Spent $30 on lunch")
     h.say("/undo 3")
     r = h.say("/report")
-    assert "Consumption spending: $120.00 gross, $100.00 net of $20.00 refunds" in r
-    assert "Reversed entries: 1" in r
+    assert "Spent: $100.00 (after $20.00 refunds)" in r
+    assert "Undone entries: 1" in r
 
 
 def test_over_budget_category(h):
     h.say("/budget set Food 50")
     h.say("Spent $60 on dinner")
     r = h.say("/report")
-    assert "Food and groceries: $60.00 of $50.00 (120%), OVER" in r
+    assert "Food and groceries: $60.00 of $50.00 used, over by $10.00" in r
     assert "Stop discretionary spending in Food and groceries; it is $10.00 over." in r
 
 
 def test_missing_account_balances_disclosed(h):
-    assert "no accounts recorded" in h.say("/report")
+    assert "Balances: none added" in h.say("/report")
     h.say("/accounts add Main main 1000")
-    assert "Balances (user-maintained, not live bank data):" in h.say("/report")
+    assert "Balances (as you entered them, not live bank data): Main $1,000.00" in h.say("/report")
 
 
 def test_current_and_previous_months(h):
@@ -57,10 +57,10 @@ def test_current_and_previous_months(h):
     h.say("Spent $70 on lunch")
     h.set_now(sgt(2026, 10, 10))
     h.say("Spent $20 on lunch")
-    assert "Consumption spending: $20.00 gross" in h.say("/report")
+    assert "Spent: $20.00" in h.say("/report")
     last = h.say("/report last")
-    assert "September 2026" in last and "Consumption spending: $70.00 gross" in last
-    assert "September 2026" in h.say("/report 2026-09")
+    assert "SEPTEMBER 2026" in last and "Spent: $70.00" in last
+    assert "SEPTEMBER 2026" in h.say("/report 2026-09")
 
 
 def test_report_reconciles_with_underlying_transactions(h):
@@ -77,7 +77,7 @@ def test_report_reconciles_with_underlying_transactions(h):
     assert (s.gross_spending, s.income, s.refunds) == (exp, inc, ref)
     assert s.net_cash_flow == inc + ref - exp
     r = build_report(h.store, TODAY)
-    assert "Transfers between own accounts: $100.00 (excluded from income and spending" in r
+    assert "Moved between your accounts: $100.00 (not counted as spending or income)" in r
 
 
 def test_followups_use_same_engine(h):
